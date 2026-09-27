@@ -144,7 +144,11 @@ func (env *CloneInfo) bootstrapUsingPgbasebackup(ctx context.Context) error {
 	// like when the I/O is overloaded.
 	connectionString += " options='-c wal_sender_timeout=0s'"
 
-	if err := postgres.ClonePgData(ctx, connectionString, env.info.PgData, env.info.PgWal); err != nil {
+	checkpoint := cluster.Annotations["dbaas.viettel.vn/pgbasebackup-checkpoint"]
+	if checkpoint != "" && checkpoint != "fast" && checkpoint != "spread" {
+		return fmt.Errorf("invalid pg_basebackup checkpoint mode %q", checkpoint)
+	}
+	if err := postgres.ClonePgData(ctx, connectionString, env.info.PgData, env.info.PgWal, checkpoint == "fast"); err != nil {
 		return fmt.Errorf("while cloning pgdata: %w", err)
 	}
 

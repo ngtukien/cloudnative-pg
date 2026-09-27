@@ -37,7 +37,7 @@ import (
 
 // ClonePgData clones an existing server, given its connection string,
 // to a certain data directory
-func ClonePgData(ctx context.Context, connectionString, targetPgData, walDir string) error {
+func ClonePgData(ctx context.Context, connectionString, targetPgData, walDir string, fastCheckpoint bool) error {
 	log.Info("Waiting for server to be available", "connectionString", connectionString)
 
 	db, err := pool.NewDBConnection(connectionString, pool.ConnectionProfilePostgresqlPhysicalReplication)
@@ -53,16 +53,7 @@ func ClonePgData(ctx context.Context, connectionString, targetPgData, walDir str
 		return fmt.Errorf("source server not available: %v", connectionString)
 	}
 
-	options := []string{
-		"-D", targetPgData,
-		"-v",
-		"-w",
-		"-d", connectionString,
-	}
-
-	if walDir != "" {
-		options = append(options, "--waldir", walDir)
-	}
+	options := pgBaseBackupOptions(connectionString, targetPgData, walDir, fastCheckpoint)
 
 	pgBaseBackupCmd := exec.Command(pgBaseBackupName, options...) // #nosec
 	err = execlog.RunStreaming(pgBaseBackupCmd, pgBaseBackupName)
@@ -71,6 +62,23 @@ func ClonePgData(ctx context.Context, connectionString, targetPgData, walDir str
 	}
 
 	return nil
+}
+
+// pgBaseBackupOptions keeps the checkpoint override limited to external bootstrap.
+func pgBaseBackupOptions(connectionString, targetPgData, walDir string, fastCheckpoint bool) []string {
+	options := []string{
+		"-D", targetPgData,
+		"-v",
+		"-w",
+		"-d", connectionString,
+	}
+	if fastCheckpoint {
+		options = append(options, "--checkpoint=fast")
+	}
+	if walDir != "" {
+		options = append(options, "--waldir", walDir)
+	}
+	return options
 }
 
 // Join creates a new instance joined to an existing PostgreSQL cluster
@@ -87,7 +95,7 @@ func (info InitInfo) Join(ctx context.Context, cluster *apiv1.Cluster) error {
 		return err
 	}
 
-	if err := ClonePgData(ctx, primaryConnInfo, info.PgData, info.PgWal); err != nil {
+	if err := ClonePgData(ctx, primaryConnInfo, info.PgData, info.PgWal, false); err != nil {
 		return err
 	}
 
