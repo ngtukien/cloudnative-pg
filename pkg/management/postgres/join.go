@@ -53,11 +53,40 @@ func ClonePgData(ctx context.Context, connectionString, targetPgData, walDir str
 		return fmt.Errorf("source server not available: %v", connectionString)
 	}
 
-	options := pgBaseBackupOptions(connectionString, targetPgData, walDir, fastCheckpoint)
+	return runPgBaseBackup(pgBaseBackupOptions(connectionString, targetPgData, walDir, fastCheckpoint))
+}
 
-	pgBaseBackupCmd := exec.Command(pgBaseBackupName, options...) // #nosec
-	err = execlog.RunStreaming(pgBaseBackupCmd, pgBaseBackupName)
+// ClonePgDataWithSlot clones an existing server like ClonePgData, creating the
+// physical replication slot slotName on the source and streaming the WAL through
+// it, so the source retains the WAL needed after the backup ends
+func ClonePgDataWithSlot(ctx context.Context, connectionString, targetPgData, walDir, slotName string) error {
+	log.Info("Waiting for server to be available", "connectionString", connectionString)
+
+	db, err := pool.NewDBConnection(connectionString, pool.ConnectionProfilePostgresqlPhysicalReplication)
 	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = db.Close()
+	}()
+
+	if err := waitForStreamingConnectionAvailable(ctx, db); err != nil {
+		return fmt.Errorf("source server not available: %v", connectionString)
+	}
+
+	return runPgBaseBackup(pgBaseBackupSlotOptions(connectionString, targetPgData, walDir, slotName))
+}
+
+// pgBaseBackupSlotOptions always uses a fast checkpoint: the clone must start
+// right away because the conversion that follows is time bound
+func pgBaseBackupSlotOptions(connectionString, targetPgData, walDir, slotName string) []string {
+	return append(pgBaseBackupOptions(connectionString, targetPgData, walDir, true),
+		"-X", "stream", "-C", "-S", slotName)
+}
+
+func runPgBaseBackup(options []string) error {
+	pgBaseBackupCmd := exec.Command(pgBaseBackupName, options...) // #nosec
+	if err := execlog.RunStreaming(pgBaseBackupCmd, pgBaseBackupName); err != nil {
 		return fmt.Errorf("error in pg_basebackup, %w", err)
 	}
 

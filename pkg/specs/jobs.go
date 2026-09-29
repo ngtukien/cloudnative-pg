@@ -272,6 +272,22 @@ func CreatePrimaryJobViaPgBaseBackup(cluster apiv1.Cluster, nodeSerial int) *bat
 	return CreatePrimaryJob(cluster, nodeSerial, jobRolePGBaseBackup, initCommand, getExtensions(&cluster))
 }
 
+// CreatePrimaryJobViaPgCreateSubscriber creates a new primary instance cloned
+// from an external server and converted into a logical subscriber of it
+func CreatePrimaryJobViaPgCreateSubscriber(cluster apiv1.Cluster, nodeSerial int) *batchv1.Job {
+	commonFlags := buildCommonInitJobFlags(cluster)
+	initCommand := make([]string, 0, 3+len(commonFlags))
+	initCommand = append(initCommand,
+		"/controller/manager",
+		"instance",
+		"pgcreatesubscriber",
+	)
+
+	initCommand = append(initCommand, commonFlags...)
+
+	return CreatePrimaryJob(cluster, nodeSerial, jobRolePgCreateSubscriber, initCommand, getExtensions(&cluster))
+}
+
 // JoinReplicaInstance create a new PostgreSQL node, copying the contents from another Pod
 func JoinReplicaInstance(cluster apiv1.Cluster, nodeSerial int) *batchv1.Job {
 	commonFlags := buildCommonInitJobFlags(cluster)
@@ -319,12 +335,13 @@ func buildCommonInitJobFlags(cluster apiv1.Cluster) []string {
 type jobRole string
 
 const (
-	jobRoleImport           jobRole = "import"
-	jobRoleInitDB           jobRole = "initdb"
-	jobRolePGBaseBackup     jobRole = "pgbasebackup"
-	jobRoleFullRecovery     jobRole = "full-recovery"
-	jobRoleJoin             jobRole = "join"
-	jobRoleSnapshotRecovery jobRole = "snapshot-recovery"
+	jobRoleImport             jobRole = "import"
+	jobRoleInitDB             jobRole = "initdb"
+	jobRolePGBaseBackup       jobRole = "pgbasebackup"
+	jobRolePgCreateSubscriber jobRole = "pgcreatesubscriber"
+	jobRoleFullRecovery       jobRole = "full-recovery"
+	jobRoleJoin               jobRole = "join"
+	jobRoleSnapshotRecovery   jobRole = "snapshot-recovery"
 )
 
 // getJobName returns a string indicating the job name

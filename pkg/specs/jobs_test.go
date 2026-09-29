@@ -337,3 +337,22 @@ var _ = Describe("Job created via InitDB", func() {
 		}))
 	})
 })
+
+var _ = Describe("Job created via pg_createsubscriber", func() {
+	It("runs the pgcreatesubscriber subcommand with its own role", func() {
+		cluster := apiv1.Cluster{
+			ObjectMeta: metav1.ObjectMeta{Name: "cluster"},
+			Spec: apiv1.ClusterSpec{
+				ImageName: "postgres:14.8",
+				Bootstrap: &apiv1.BootstrapConfiguration{
+					PgCreateSubscriber: &apiv1.BootstrapPgCreateSubscriber{Source: "source"},
+				},
+			},
+		}
+		job := CreatePrimaryJobViaPgCreateSubscriber(cluster, 1)
+		Expect(job.Name).To(Equal("cluster-1-pgcreatesubscriber"))
+		Expect(job.Labels).To(HaveKeyWithValue(utils.JobRoleLabelName, "pgcreatesubscriber"))
+		Expect(job.Spec.Template.Spec.Containers[0].Command).To(Equal(
+			[]string{"/controller/manager", "instance", "pgcreatesubscriber"}))
+	})
+})

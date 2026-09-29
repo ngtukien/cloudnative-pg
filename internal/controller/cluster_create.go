@@ -1270,6 +1270,8 @@ func (r *ClusterReconciler) buildPrimaryInstanceJob(
 ) (*batchv1.Job, error) {
 	isBootstrappingFromRecovery := cluster.Spec.Bootstrap != nil && cluster.Spec.Bootstrap.Recovery != nil
 	isBootstrappingFromBaseBackup := cluster.Spec.Bootstrap != nil && cluster.Spec.Bootstrap.PgBaseBackup != nil
+	isBootstrappingViaPgCreateSubscriber := cluster.Spec.Bootstrap != nil &&
+		cluster.Spec.Bootstrap.PgCreateSubscriber != nil
 
 	switch {
 	case isBootstrappingFromRecovery && recoverySnapshot != nil:
@@ -1292,6 +1294,11 @@ func (r *ClusterReconciler) buildPrimaryInstanceJob(
 	case isBootstrappingFromBaseBackup:
 		r.Recorder.Event(cluster, "Normal", "CreatingInstance", "Primary instance (from physical backup)")
 		return specs.CreatePrimaryJobViaPgBaseBackup(*cluster, nodeSerial), nil
+
+	case isBootstrappingViaPgCreateSubscriber:
+		r.Recorder.Event(cluster, "Normal", "CreatingInstance",
+			"Primary instance (physical clone converted into a logical subscriber)")
+		return specs.CreatePrimaryJobViaPgCreateSubscriber(*cluster, nodeSerial), nil
 
 	default:
 		r.Recorder.Event(cluster, "Normal", "CreatingInstance", "Primary instance (initdb)")
