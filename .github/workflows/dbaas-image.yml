@@ -1,0 +1,81 @@
+# Image operator của fork dbaas: ghcr.io/<owner>/cloudnative-pg-dev:<version>.
+#
+# Tự chạy khi push tag v<upstream>-dbaas.N trên nhánh release/<upstream>-dbaas. Chạy tay cho tag có sẵn:
+#   gh workflow run dbaas-image.yml -R ngtukien/cloudnative-pg --ref release/v1.30.1-dbaas -f ref=v1.30.1-dbaas.1
+# Digest in ở Summary của lần chạy, ghim vào dbaas: infra/ansible/group_vars/all.yml → images.cnpg.
+name: dbaas-image
+
+on:
+  push:
+    tags:
+      - 'v*-dbaas.*'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Tag hoặc commit cần build (mặc định là ref đang chạy)
+        required: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/cloudnative-pg-dev
+    steps:
+      - name: Check out
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          # goreleaser đọc tag để đặt version
+          fetch-depth: 0
+
+      - name: Version
+        id: version
+        run: |
+          set -euo pipefail
+          if tag=$(git describe --tags --exact-match 2>/dev/null); then
+            echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+          else
+            # Không đứng đúng tag: goreleaser chạy --snapshot, image tag theo commit
+            echo "version=" >> "$GITHUB_OUTPUT"
+          fi
+          echo "commit=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # make docker-build: goreleaser build manager rồi docker buildx bake --push (target distroless)
+      - name: Build and push
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          COMMIT: ${{ steps.version.outputs.commit }}
+        run: |
+          set -euo pipefail
+          make docker-build ARCH=amd64 VERSION="$VERSION" COMMIT="$COMMIT" \
+            CONTROLLER_IMG="$IMAGE:${VERSION:-$COMMIT}"
+
+      - name: Digest
+        env:
+          TAG: ${{ steps.version.outputs.version || steps.version.outputs.commit }}
+        run: |
+          set -euo pipefail
+          digest=$(docker buildx imagetools inspect "$IMAGE:$TAG" --format '{{json .Manifest}}' | jq -r .digest)
+          {
+            echo "### Image"
+            echo '```'
+            echo "$IMAGE:$TAG@$digest"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
